@@ -150,7 +150,7 @@ def load_model(filepath=None):
     if filepath is not None:
         model_loaded.load_weights(filepath)
     else:
-        model_loaded.save(FOLDER_NAME + 'whole_model/outer_{}'.format(0))
+        model_loaded.save(FOLDER_NAME + 'whole_model/outer_{}.keras'.format(0))
         print('model initial state has been saved')
 
     return model_loaded
@@ -529,7 +529,7 @@ def train(model, outer_start=0, outer_max=100):
         buffer = list()
 
         # getting new samples
-        new_buffer = collect_samples_multiprocess_queue(model_filename=FOLDER_NAME + f'whole_model/outer_{outer - 1}',
+        new_buffer = collect_samples_multiprocess_queue(model_filename=FOLDER_NAME + f'whole_model/outer_{outer - 1}.keras',
                                                         target_size=buffer_new_size)
         save_buffer_to_file(FOLDER_NAME + f'dataset/buffer_{outer}.pkl', new_buffer)
         buffer += new_buffer
@@ -574,8 +574,8 @@ def train(model, outer_start=0, outer_max=100):
             print('      loss = {:8.3f}   mse = {:8.3f}'.format(history.history['loss'][-1],
                                                                 history.history['mean_squared_error'][-1]))
 
-        model.save(FOLDER_NAME + 'whole_model/outer_{}'.format(outer))
-        model.save_weights(FOLDER_NAME + 'checkpoints_dqn/outer_{}'.format(outer))
+        model.save(FOLDER_NAME + 'whole_model/outer_{}.keras'.format(outer))
+        model.save_weights(FOLDER_NAME + 'checkpoints_dqn/outer_{}.keras'.format(outer))
 
         time_outer_end = time.time()
         text_ = ''
@@ -758,6 +758,7 @@ def get_reward(add_scores, dones, add=0):
 
 
 if __name__ == "__main__":
+    model_path = FOLDER_NAME + 'whole_model/outer_{}.keras'.format(OUT_START)
     if MODE == 'human_player':
         game = Game(gui=Gui(), seed=None)
         game.restart()
@@ -765,8 +766,39 @@ if __name__ == "__main__":
     elif MODE == 'ai_player_training':
         if OUT_START == 0:
             load_model()
-        model_load = keras.models.load_model(FOLDER_NAME + 'whole_model/outer_{}'.format(OUT_START))
+        if os.path.exists(model_path):
+            # If model exists, load it
+            model_load = keras.models.load_model(model_path)
+            print(f"Model loaded from: {model_path}")
+        else:
+            # If model doesn't exist, create and save a new one
+            if STATE_INPUT == 'short' or STATE_INPUT == 'long':
+                model_loaded = make_model_conv2d_v1()
+            elif STATE_INPUT == 'dense':
+                model_loaded = make_model_dense()
+            else:
+                model_loaded = None
+                sys.stderr.write('STATE_INPUT is wrong. Exit...\n')
+                exit()
+
+            model_loaded.compile(
+                optimizer=keras.optimizers.Adam(0.001),
+                loss='mean_squared_error',
+                metrics=['mean_squared_error']  # Use a list here
+            )
+
+            # Save the new model
+            try:
+                model_loaded.save(model_path)
+                print(f"Model saved to: {model_path}")
+            except Exception as e:
+                sys.stderr.write(f"Error saving model: {e}\n")
+                exit()
+            model_load = model_loaded  # Set model to newly created model
+
+            # Continue training with the loaded model
         train(model_load, outer_start=OUT_START, outer_max=OUTER_MAX)
+
     elif MODE == 'ai_player_watching':
-        model_load = keras.models.load_model(FOLDER_NAME + 'whole_model/outer_{}'.format(OUT_START))
+        model_load = keras.models.load_model(FOLDER_NAME + 'whole_model/outer_{}.keras'.format(OUT_START))
         ai_play_search(model_load, is_gui_on=True)
