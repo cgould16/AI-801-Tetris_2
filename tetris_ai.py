@@ -758,47 +758,59 @@ def get_reward(add_scores, dones, add=0):
 
 
 if __name__ == "__main__":
-    model_path = FOLDER_NAME + 'whole_model/outer_{}.keras'.format(OUT_START)
-    if MODE == 'human_player':
-        game = Game(gui=Gui(), seed=None)
-        game.restart()
-        game.run()
-    elif MODE == 'ai_player_training':
-        if OUT_START == 0:
-            load_model()
-        if os.path.exists(model_path):
-            # If model exists, load it
-            model_load = keras.models.load_model(model_path)
-            print(f"Model loaded from: {model_path}")
-        else:
-            # If model doesn't exist, create and save a new one
-            if STATE_INPUT == 'short' or STATE_INPUT == 'long':
-                model_loaded = make_model_conv2d_v1()
-            elif STATE_INPUT == 'dense':
-                model_loaded = make_model_dense()
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    physical_devices = tf.config.list_physical_devices('GPU')
+
+    if physical_devices:
+        print(f"Available GPUs: {len(physical_devices)}")
+        # Optionally set memory growth to prevent TensorFlow from allocating all memory upfront
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+    else:
+        print("No GPU detected. Training will proceed on CPU.")
+
+    # Set the device to GPU for training if available, otherwise use CPU
+    with tf.device('/GPU:0' if physical_devices else '/CPU:0'):
+        model_path = FOLDER_NAME + 'whole_model/outer_{}.keras'.format(OUT_START)
+        if MODE == 'human_player':
+            game = Game(gui=Gui(), seed=None)
+            game.restart()
+            game.run()
+        elif MODE == 'ai_player_training':
+            if OUT_START == 0:
+                load_model()
+            if os.path.exists(model_path):
+                # If model exists, load it
+                model_load = keras.models.load_model(model_path)
+                print(f"Model loaded from: {model_path}")
             else:
-                model_loaded = None
-                sys.stderr.write('STATE_INPUT is wrong. Exit...\n')
-                exit()
+                # If model doesn't exist, create and save a new one
+                if STATE_INPUT == 'short' or STATE_INPUT == 'long':
+                    model_loaded = make_model_conv2d_v1()
+                elif STATE_INPUT == 'dense':
+                    model_loaded = make_model_dense()
+                else:
+                    model_loaded = None
+                    sys.stderr.write('STATE_INPUT is wrong. Exit...\n')
+                    exit()
 
-            model_loaded.compile(
-                optimizer=keras.optimizers.Adam(0.001),
-                loss='mean_squared_error',
-                metrics=['mean_squared_error']  # Use a list here
-            )
+                model_loaded.compile(
+                    optimizer=keras.optimizers.Adam(0.001),
+                    loss='mean_squared_error',
+                    metrics=['mean_squared_error']  # Use a list here
+                )
 
-            # Save the new model
-            try:
-                model_loaded.save(model_path)
-                print(f"Model saved to: {model_path}")
-            except Exception as e:
-                sys.stderr.write(f"Error saving model: {e}\n")
-                exit()
-            model_load = model_loaded  # Set model to newly created model
+                # Save the new model
+                try:
+                    model_loaded.save(model_path)
+                    print(f"Model saved to: {model_path}")
+                except Exception as e:
+                    sys.stderr.write(f"Error saving model: {e}\n")
+                    exit()
+                model_load = model_loaded  # Set model to newly created model
 
-            # Continue training with the loaded model
-        train(model_load, outer_start=OUT_START, outer_max=OUTER_MAX)
+                # Continue training with the loaded model
+            train(model_load, outer_start=OUT_START, outer_max=OUTER_MAX)
 
-    elif MODE == 'ai_player_watching':
-        model_load = keras.models.load_model(FOLDER_NAME + 'whole_model/outer_{}.keras'.format(OUT_START))
-        ai_play_search(model_load, is_gui_on=True)
+        elif MODE == 'ai_player_watching':
+            model_load = keras.models.load_model(FOLDER_NAME + 'whole_model/outer_{}.keras'.format(OUT_START))
+            ai_play_search(model_load, is_gui_on=True)
