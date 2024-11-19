@@ -5,10 +5,13 @@ import threading
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '4'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+#os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false"
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from keras.optimizers import Adam
 from game import Game
 from tetromino import Tetromino
 import random
@@ -142,15 +145,15 @@ def load_model(filepath=None):
         exit()
 
     model_loaded.compile(
-        optimizer=keras.optimizers.Adam(0.001),
+        optimizer = Adam(learning_rate=0.001),
         # loss='huber_loss',
         loss='mean_squared_error',
-        metrics='mean_squared_error'
+        metrics=['mean_squared_error']
     )
     if filepath is not None:
         model_loaded.load_weights(filepath)
     else:
-        model_loaded.save(FOLDER_NAME + 'whole_model/outer_{}.keras'.format(0))
+        model_loaded.save(FOLDER_NAME + 'whole_model/outer_{}.h5'.format(0))
         print('model initial state has been saved')
 
     return model_loaded
@@ -519,7 +522,7 @@ def train(model, outer_start=0, outer_max=100):
     buffer_outer_max = 4
     repeat_new_buffer = 2
     history = None
-
+    optimizer = Adam(learning_rate=0.001)  # Adjust the learning rate if needed
     for outer in range(outer_start + 1, outer_start + 1 + outer_max):
         print('======== outer = {} ========'.format(outer))
         time_outer_begin = time.time()
@@ -529,11 +532,13 @@ def train(model, outer_start=0, outer_max=100):
         buffer = list()
 
         # getting new samples
-        new_buffer = collect_samples_multiprocess_queue(model_filename=FOLDER_NAME + f'whole_model/outer_{outer - 1}.keras',
-                                                        target_size=buffer_new_size)
-        save_buffer_to_file(FOLDER_NAME + f'dataset/buffer_{outer}.pkl', new_buffer)
-        buffer += new_buffer
-
+        try:
+            new_buffer = collect_samples_multiprocess_queue(model_filename=FOLDER_NAME + f'whole_model/outer_{outer - 1}.h5',
+                                                            target_size=buffer_new_size)
+            save_buffer_to_file(FOLDER_NAME + f'dataset/buffer_{outer}.pkl', new_buffer)
+            buffer += new_buffer
+        except Exception as e:
+            print(e)
         # load more samples. The latest dataset can be added to the buffer twice to give them larger weight.
         for i in range(max(1, outer - buffer_outer_max + 1), outer):
             buffer += load_buffer_from_file(filename=FOLDER_NAME + 'dataset/buffer_{}.pkl'.format(i))
@@ -570,12 +575,13 @@ def train(model, outer_start=0, outer_max=100):
                 save_training_dataset_to_file(filename=FOLDER_NAME + 'dataset/dataset_{}.pkl'.format(outer),
                                               dataset=(s, target))
 
+            model.compile(optimizer=optimizer, loss='mean_squared_error', metrics=['mean_squared_error'])
             history = model.fit(split_input(s), target, batch_size=batch_training, epochs=epoch_training, verbose=0)
             print('      loss = {:8.3f}   mse = {:8.3f}'.format(history.history['loss'][-1],
                                                                 history.history['mean_squared_error'][-1]))
 
-        model.save(FOLDER_NAME + 'whole_model/outer_{}.keras'.format(outer))
-        model.save_weights(FOLDER_NAME + 'checkpoints_dqn/outer_{}.keras'.format(outer))
+        model.save(FOLDER_NAME + 'whole_model/outer_{}.h5'.format(outer))
+        model.save_weights(FOLDER_NAME + 'checkpoints_dqn/outer_{}.weights.h5'.format(outer))
 
         time_outer_end = time.time()
         text_ = ''
@@ -685,7 +691,7 @@ def append_record(text, filename=None):
 
 
 def collect_samples_multiprocess_queue(model_filename, target_size=10000):
-    timeout = 7200
+    timeout = 30000
     cpu_count = min(multiprocessing.cpu_count(), CPU_MAX)
     jobs = list()
     q = multiprocessing.Queue()
@@ -757,60 +763,50 @@ def get_reward(add_scores, dones, add=0):
     return np.array(reward).reshape([-1, 1])
 
 
-if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    physical_devices = tf.config.list_physical_devices('GPU')
-
+def setup_device():
+    # Check for available physical GPUs
+    print(tf.sysconfig.get_build_info())
+    physical_devices = tf.config.list_physical_devices("GPU")
     if physical_devices:
-        print(f"Available GPUs: {len(physical_devices)}")
-        # Optionally set memory growth to prevent TensorFlow from allocating all memory upfront
-        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+        # Enable memory growth for all GPUs (not just the first one)
+        try:
+            if physical_devices:
+                tf.config.experimental.set_virtual_device_configuration(physical_devices[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)])
+            logical_gpus = tf.config.list_logical_devices('GPU')
+            print(f"Physical GPUs: {len(physical_devices)}, Logical GPUs: {len(logical_gpus)}")
+
+        except RuntimeError as e:
+            print(f"Error setting memory growth: {e}")
+            sys.exit(1)
+
     else:
         print("No GPU detected. Training will proceed on CPU.")
+        # Fallback to CPU if no GPU is found
+        tf.config.set_visible_devices([], 'GPU')
 
-    # Set the device to GPU for training if available, otherwise use CPU
-    with tf.device('/GPU:0' if physical_devices else '/CPU:0'):
-        model_path = FOLDER_NAME + 'whole_model/outer_{}.keras'.format(OUT_START)
-        if MODE == 'human_player':
-            game = Game(gui=Gui(), seed=None)
-            game.restart()
-            game.run()
-        elif MODE == 'ai_player_training':
-            if OUT_START == 0:
-                load_model()
-            if os.path.exists(model_path):
-                # If model exists, load it
-                model_load = keras.models.load_model(model_path)
-                print(f"Model loaded from: {model_path}")
-            else:
-                # If model doesn't exist, create and save a new one
-                if STATE_INPUT == 'short' or STATE_INPUT == 'long':
-                    model_loaded = make_model_conv2d_v1()
-                elif STATE_INPUT == 'dense':
-                    model_loaded = make_model_dense()
-                else:
-                    model_loaded = None
-                    sys.stderr.write('STATE_INPUT is wrong. Exit...\n')
-                    exit()
+    return physical_devices
 
-                model_loaded.compile(
-                    optimizer=keras.optimizers.Adam(0.001),
-                    loss='mean_squared_error',
-                    metrics=['mean_squared_error']  # Use a list here
-                )
 
-                # Save the new model
-                try:
-                    model_loaded.save(model_path)
-                    print(f"Model saved to: {model_path}")
-                except Exception as e:
-                    sys.stderr.write(f"Error saving model: {e}\n")
-                    exit()
-                model_load = model_loaded  # Set model to newly created model
 
-                # Continue training with the loaded model
-            train(model_load, outer_start=OUT_START, outer_max=OUTER_MAX)
+if __name__ == "__main__":
+    multiprocessing.set_start_method("spawn")
+    # Set the device (GPU/CPU)
+    physical_devices = setup_device()
+    print(physical_devices)
+    # Define model path and mode
+    model_path = FOLDER_NAME + 'whole_model/outer_{}.h5'.format(OUT_START)
 
-        elif MODE == 'ai_player_watching':
-            model_load = keras.models.load_model(FOLDER_NAME + 'whole_model/outer_{}.keras'.format(OUT_START))
-            ai_play_search(model_load, is_gui_on=True)
+    if MODE == 'human_player':
+        game = Game(gui=Gui(), seed=None)
+        game.restart()
+        game.run()
+
+
+    elif MODE == 'ai_player_training':
+        load_model()
+        model_load = keras.models.load_model(model_path)
+        train(model_load, outer_start=OUT_START, outer_max=OUTER_MAX)
+
+    elif MODE == 'ai_player_watching':
+        model_load = keras.models.load_model(model_path)
+        ai_play_search(model_load, is_gui_on=True)
