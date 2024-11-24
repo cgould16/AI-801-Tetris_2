@@ -514,6 +514,51 @@ def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per
 
     return data, avg_score
 
+def buffer_data_generator(model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer):
+    """
+    Generates data dynamically with multiprocessing for new samples
+    and integrates previous buffers for training.
+    """
+    # Step 1: Collect new samples with multiprocessing
+    try:
+        new_buffer = collect_samples_multiprocess_queue(model_filename=model_filename, target_size=buffer_new_size)
+        print(f"New buffer size: {len(new_buffer)}")
+        yield from new_buffer  # Dynamically yield new samples
+    except Exception as e:
+        print(f"Error collecting new samples: {e}")
+
+    # Step 2: Load previous buffers from files
+    for i in range(max(1, outer - buffer_outer_max + 1), outer):
+        try:
+            previous_buffer = load_buffer_from_file(FOLDER_NAME + f'dataset/buffer_{i}.pkl')
+            print(f"Loaded previous buffer {i} with size: {len(previous_buffer)}")
+            yield from previous_buffer
+        except FileNotFoundError:
+            print(f"Previous buffer file not found: buffer_{i}.pkl")
+        except Exception as e:
+            print(f"Error loading previous buffer {i}: {e}")
+
+    # Step 3: Repeat the latest buffer for additional weighting
+    for _ in range(repeat_new_buffer):
+        try:
+            repeated_buffer = load_buffer_from_file(FOLDER_NAME + f'dataset/buffer_{outer}.pkl')
+            print(f"Repeating buffer {outer} with size: {len(repeated_buffer)}")
+            yield from repeated_buffer
+        except FileNotFoundError:
+            print(f"Repeated buffer file not found: buffer_{outer}.pkl")
+        except Exception as e:
+            print(f"Error loading repeated buffer {outer}: {e}")
+
+
+# Dataset Pipeline
+def create_dataset(model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer):
+    dataset = tf.data.Dataset.from_generator(
+        lambda: buffer_data_generator(
+            model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer
+        ),
+        output_signature=(tf.TensorSpec(shape=shape_main_grid[1:], dtype=tf.int16))  # Replace ... with actual shape and dtype
+    )
+    return dataset.shuffle(10000).batch(512).prefetch(tf.data.AUTOTUNE)
 
 def train(model, outer_start=0, outer_max=100):
     # outer_max: update samples
@@ -622,6 +667,9 @@ def load_buffer_from_file(filename):
 
 
 def process_buffer_best(buffer):
+    if not buffer:  # Check if buffer is empty
+        print("Warning: Received empty buffer in process_buffer_best.")
+        return np.array([]), np.array([]), np.array([]), np.array([])
     s = list()
     s_ = list()
     add_scores = list()
