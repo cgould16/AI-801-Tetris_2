@@ -16,15 +16,15 @@ GAME_TYPE = 'regular'
 
 #   2.  folder name to store dataset and model. './anything_you_like/'
 # FOLDER_NAME = './tetris_extra/'
-FOLDER_NAME = './tetris_regular_cnn_v1_nov_13/'
+FOLDER_NAME = "/Users/joshrackham/AI-801-Tetris_2/tetris_regular_cnn_v1_nov_24/"
 
 #   3.  if > 0, then model {FOLDER_NAME}/whole_model/outer_{OUT_START} will be loaded to continue training or watch it play
 #       if 0, then create a brand-new model.
 OUT_START = 0
 
 #   4.  choose the mode
-#MODE = 'human_player'
+# MODE = 'human_player'
 MODE = 'ai_player_training'
-#MODE = 'ai_player_watching'
+# MODE = 'ai_player_watching'
 
 #   5.  run tetris_ai.py

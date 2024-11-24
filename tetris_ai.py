@@ -8,7 +8,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '4'
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-#os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false"
+# os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false"
 
 import numpy as np
 import tensorflow as tf
@@ -375,8 +375,7 @@ def gamestates_to_training_data(env, gamestates_steps):
     return row_data
 
 
-def get_data_from_playing_cnn2d(model_filename, target_size=8000, max_steps_per_episode=2000, proc_num=0,
-                                queue=None):
+def get_data_from_playing_cnn2d(model_filename, target_size=8000, max_steps_per_episode=2000):
     tf.autograph.set_verbosity(3)
     model = keras.models.load_model(model_filename)
     if model is None:
@@ -458,17 +457,18 @@ def get_data_from_playing_cnn2d(model_filename, target_size=8000, max_steps_per_
     return data, avg_score
 
 
-def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per_episode=1000, proc_num=0,
-                                 queue=None):
+def get_data_from_playing_search(
+    model_filename, target_size=8000, max_steps_per_episode=1000
+):
     tf.autograph.set_verbosity(3)
     model = keras.models.load_model(model_filename)
     if model is None:
-        print('ERROR: model has not been loaded. Check this part.')
+        print("ERROR: model has not been loaded. Check this part.")
         exit()
 
+    # Set epsilon value (assuming it's a global variable controlling exploration)
     global epsilon
-    if proc_num == 0:
-        epsilon = 0
+    epsilon = 0  # Adjust epsilon as needed
 
     data = list()
     env = Game()
@@ -480,7 +480,9 @@ def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per
         env.reset()
         episode_data = list()
         for step in range(int(max_steps_per_episode)):
-            gamestates_new, gamestates_steps, reward_prev = search_steps(model, env, action_take=5)
+            gamestates_new, gamestates_steps, reward_prev = search_steps(
+                model, env, action_take=5
+            )
             episode_data += gamestates_to_training_data(env, gamestates_steps[0])
 
             if rand.random() > epsilon:
@@ -491,46 +493,52 @@ def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per
             if env.is_done() or len(data) + len(episode_data) >= target_size:
                 break
 
-            if proc_num == 0:
-                sys.stdout.write(
-                    f'\r data: {len(data) + len(episode_data)} / {target_size} |'
-                    f' score per step : {(total_score + env.current_state.score) / (len(data) + len(episode_data)):<6.2f} |'
-                    f' game num : {episode + 1}')
-                sys.stdout.flush()
+            # Print progress
+            sys.stdout.write(
+                f"\r data: {len(data) + len(episode_data)} / {target_size} |"
+                f" score per step: {(total_score + env.current_state.score) / (len(data) + len(episode_data)):<6.2f} |"
+                f" game num: {episode + 1}"
+            )
+            sys.stdout.flush()
 
         data += episode_data
         total_score += env.current_state.score
 
         if len(data) >= target_size:
-            if proc_num == 0:
-                print('\n proc_num: #{:<2d} | total episodes:{:<4d} | avg score:{:<7.2f} | data size:{}'.format(
-                    proc_num, episode + 1, total_score / (episode + 1), len(data)))
+            print(
+                "\nTotal episodes: {:<4d} | avg score: {:<7.2f} | data size: {}".format(
+                    episode + 1, total_score / (episode + 1), len(data)
+                )
+            )
             avg_score = total_score / (episode + 1)
             break
 
-    if queue is not None:
-        queue.put((data, avg_score), block=False)
-        return
-
     return data, avg_score
 
-def buffer_data_generator(model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer):
+
+def buffer_data_generator(
+    model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer
+):
     """
-    Generates data dynamically with multiprocessing for new samples
+    Generates data dynamically without multiprocessing for new samples
     and integrates previous buffers for training.
     """
-    # Step 1: Collect new samples with multiprocessing
+    # Step 1: Collect new samples without multiprocessing
     try:
-        new_buffer = collect_samples_multiprocess_queue(model_filename=model_filename, target_size=buffer_new_size)
-        print(f"New buffer size: {len(new_buffer)}")
-        yield from new_buffer  # Dynamically yield new samples
+        new_data, avg_score = get_data_from_playing_search(
+            model_filename=model_filename, target_size=buffer_new_size
+        )
+        print(f"New buffer size: {len(new_data)} | Avg score: {avg_score}")
+        yield from new_data  # Dynamically yield new samples
     except Exception as e:
         print(f"Error collecting new samples: {e}")
 
     # Step 2: Load previous buffers from files
     for i in range(max(1, outer - buffer_outer_max + 1), outer):
         try:
-            previous_buffer = load_buffer_from_file(FOLDER_NAME + f'dataset/buffer_{i}.pkl')
+            previous_buffer = load_buffer_from_file(
+                FOLDER_NAME + f"dataset/buffer_{i}.pkl"
+            )
             print(f"Loaded previous buffer {i} with size: {len(previous_buffer)}")
             yield from previous_buffer
         except FileNotFoundError:
@@ -541,7 +549,9 @@ def buffer_data_generator(model_filename, buffer_new_size, repeat_new_buffer, bu
     # Step 3: Repeat the latest buffer for additional weighting
     for _ in range(repeat_new_buffer):
         try:
-            repeated_buffer = load_buffer_from_file(FOLDER_NAME + f'dataset/buffer_{outer}.pkl')
+            repeated_buffer = load_buffer_from_file(
+                FOLDER_NAME + f"dataset/buffer_{outer}.pkl"
+            )
             print(f"Repeating buffer {outer} with size: {len(repeated_buffer)}")
             yield from repeated_buffer
         except FileNotFoundError:
@@ -551,14 +561,21 @@ def buffer_data_generator(model_filename, buffer_new_size, repeat_new_buffer, bu
 
 
 # Dataset Pipeline
-def create_dataset(model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer):
+def create_dataset(
+    model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer
+):
     dataset = tf.data.Dataset.from_generator(
         lambda: buffer_data_generator(
             model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer
         ),
-        output_signature=(tf.TensorSpec(shape=shape_main_grid[1:], dtype=tf.int16))  # Replace ... with actual shape and dtype
+        output_signature=(
+            tf.TensorSpec(
+                shape=shape_main_grid[1:], dtype=tf.int16
+            )  # Replace with actual shape and dtype
+        ),
     )
     return dataset.shuffle(10000).batch(512).prefetch(tf.data.AUTOTUNE)
+
 
 def train(model, outer_start=0, outer_max=100):
     # outer_max: update samples
@@ -749,7 +766,7 @@ def collect_samples_multiprocess_queue(model_filename, target_size=10000):
     for i in range(cpu_count):
         p = multiprocessing.Process(target=get_data_from_playing_search,
                                     args=(
-                                        model_filename, int(target_size / cpu_count), 250, i, q))
+                                        model_filename, int(target_size / cpu_count), 250))
         jobs.append(p)
         p.start()
 
@@ -837,7 +854,6 @@ def setup_device():
         tf.config.set_visible_devices([], 'GPU')
 
     return physical_devices
-
 
 
 if __name__ == "__main__":
