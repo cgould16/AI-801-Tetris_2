@@ -1,0 +1,12 @@
+
+tetris_regular_cnn_v2_nov_18/dataset/
+
+tetris_regular_cnn_v2_nov_18/whole_model/
+
+__pycache__/
+
+roms/
+
+tetris_regular_cnn_v1_nov_13/
+
+uncommitted-changes.patch
