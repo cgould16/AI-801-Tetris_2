@@ -34,6 +34,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY roms/ ./roms/
 COPY . .
 RUN mkdir -p /app/tetris_regular_cnn_v1_nov_13/whole_model/
+RUN mkdir -p /app/tetris_regular_cnn_v1_nov_13/dataset/
+RUN mkdir -p /app/tetris_regular_cnn_v1_nov_13/checkpoints_dqn/
 
 # Set environment variables for CUDA and cuDNN
 ENV XDG_RUNTIME_DIR=/tmp/runtime-$USER

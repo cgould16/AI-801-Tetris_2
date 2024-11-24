@@ -827,7 +827,7 @@ class Game:
             tetro_type_num = Tetromino.type_str_to_num(gamestate.next[i]) - 1
             buffer2[hold_num + (i + hold_num + current_num) * pool_size + tetro_type_num] = 1
 
-        return np.reshape(np.array(buffer1 + buffer2, dtype='int8'), [1, -1])
+        return np.reshape(np.array(buffer1 + buffer2, dtype='int16'), [1, -1])
 
     def get_all_possible_gamestates(self, gamestate=None):
         if gamestate is None:

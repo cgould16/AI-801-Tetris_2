@@ -1,12 +1,15 @@
 import os
 import sys
 import threading
+import queue
+
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '4'
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 #os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false"
+
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
@@ -765,13 +768,14 @@ def get_reward(add_scores, dones, add=0):
 
 def setup_device():
     # Check for available physical GPUs
+    tf.debugging.set_log_device_placement(True)
     print(tf.sysconfig.get_build_info())
     physical_devices = tf.config.list_physical_devices("GPU")
     if physical_devices:
         # Enable memory growth for all GPUs (not just the first one)
         try:
-            if physical_devices:
-                tf.config.experimental.set_virtual_device_configuration(physical_devices[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)])
+            for gpu in physical_devices:
+                tf.config.experimental.set_memory_growth(gpu, True)
             logical_gpus = tf.config.list_logical_devices('GPU')
             print(f"Physical GPUs: {len(physical_devices)}, Logical GPUs: {len(logical_gpus)}")
 
