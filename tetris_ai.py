@@ -597,8 +597,9 @@ def train(model, outer_start=0, outer_max=100):
         buffer = list()
 
         # getting new samples
+
         try:
-            new_buffer = collect_samples_multiprocess_queue(model_filename=FOLDER_NAME + f'whole_model/outer_{outer - 1}.h5',
+            new_buffer = buffer_data_generator(model_filename=FOLDER_NAME + f'whole_model/outer_{outer - 1}.h5',
                                                             target_size=buffer_new_size)
             save_buffer_to_file(FOLDER_NAME + f'dataset/buffer_{outer}.pkl', new_buffer)
             buffer += new_buffer
