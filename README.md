@@ -15,7 +15,7 @@ run "tetris_ai.py".
 training may take a significant amount of cpu usage.
 
 
-NOTE:
-nov_13 - base model tested
-nov_24 - base model with GPU acceleration
-nov_25 - hyperparameter tuning added to incorporate encouraging exploration on early steps
+NOTE:<br/>
+nov_13 - base model tested<br/>
+nov_24 - base model with GPU acceleration<br/>
+nov_25 - hyperparameter tuning added to incorporate encouraging exploration on early steps<br/>
