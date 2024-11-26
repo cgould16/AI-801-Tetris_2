@@ -43,9 +43,10 @@ current_avg_score = 0
 rand = random.Random()
 
 penalty = -500
-# reward_coef = [1.0, 0.5, 0.3, 0.2]
-reward_coef = [1.0, 1.0, 1.0, 1.0]
-reward_coef_plan = [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, 50]
+reward_coef = [0.5, 0.4, 0.3, 0.2]
+#reward_coef = [1.0, 1.0, 1.0, 1.0]
+#reward_coef_plan = [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, 50]
+reward_coef_plan = [[0.5, 0.4, 0.3, 0.2], [1.0, 0.8, 0.4, 0.1], 5, 50]
 num_search_best = 6
 num_search_rd = 6
 env_debug = None
