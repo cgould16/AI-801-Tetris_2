@@ -1,0 +1,6 @@
+input shapes: (-1, 20, 10, 1) (1, 46) 
+ [height_sum, hole_sum, combo, is_hold, 6 * 7 type] -> length = 43 
+outer =    1 | pre-training avg score =  233.040 | loss =  299.740 | mse =  299.740 | dataset size =   36060 | new dataset size =   12020 | time elapsed:  108.5 sec | coef = [0.5, 0.4, 0.3, 0.2] | penalty =    -500 | gamma =  0.950 | search best/rd = 6, 6 |
+outer =    2 | pre-training avg score =  391.287 | loss =  223.512 | mse =  223.512 | dataset size =   48071 | new dataset size =   12017 | time elapsed:  158.4 sec | coef = [0.5, 0.4, 0.3, 0.2] | penalty =    -500 | gamma =  0.950 | search best/rd = 6, 6 |
+outer =    3 | pre-training avg score =  354.533 | loss =  198.296 | mse =  198.296 | dataset size =   60073 | new dataset size =   12012 | time elapsed:  175.0 sec | coef = [0.5, 0.4, 0.3, 0.2] | penalty =    -500 | gamma =  0.950 | search best/rd = 6, 6 |
+outer =    4 | pre-training avg score =  870.060 | loss =  189.026 | mse =  189.026 | dataset size =   72103 | new dataset size =   12018 | time elapsed:  114.1 sec | coef = [0.5, 0.4, 0.3, 0.2] | penalty =    -500 | gamma =  0.950 | search best/rd = 6, 6 |
