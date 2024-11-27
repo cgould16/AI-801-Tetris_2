@@ -44,8 +44,8 @@ rand = random.Random()
 
 penalty = -500
 reward_coef = [0.5, 0.4, 0.3, 0.2]
-#reward_coef = [1.0, 1.0, 1.0, 1.0]
-#reward_coef_plan = [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, 50]
+# reward_coef = [1.0, 1.0, 1.0, 1.0]
+# reward_coef_plan = [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, 50]
 reward_coef_plan = [[0.5, 0.4, 0.3, 0.2], [1.0, 0.6, 0.4, 0.1], 5, 50]
 num_search_best = 6
 num_search_rd = 6
@@ -380,7 +380,8 @@ def gamestates_to_training_data(env, gamestates_steps):
 def get_data_from_playing_cnn2d(model_filename, target_size=8000, max_steps_per_episode=2000, proc_num=0,
                                 queue=None):
     tf.autograph.set_verbosity(3)
-    model = keras.models.load_model(model_filename, custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
+    model = keras.models.load_model(model_filename,
+                                    custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
     if model is None:
         print('ERROR: model has not been loaded. Check this part.')
         exit()
@@ -463,7 +464,8 @@ def get_data_from_playing_cnn2d(model_filename, target_size=8000, max_steps_per_
 def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per_episode=1000, proc_num=0,
                                  queue=None):
     tf.autograph.set_verbosity(3)
-    model = keras.models.load_model(model_filename, custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
+    model = keras.models.load_model(model_filename,
+                                    custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
     if model is None:
         print('ERROR: model has not been loaded. Check this part.')
         exit()
@@ -516,6 +518,7 @@ def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per
 
     return data, avg_score
 
+
 def buffer_data_generator(model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer):
     """
     Generates data dynamically with multiprocessing for new samples
@@ -558,21 +561,25 @@ def create_dataset(model_filename, buffer_new_size, repeat_new_buffer, buffer_ou
         lambda: buffer_data_generator(
             model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer
         ),
-        output_signature=(tf.TensorSpec(shape=shape_main_grid[1:], dtype=tf.int16))  # Replace ... with actual shape and dtype
+        output_signature=(tf.TensorSpec(shape=shape_main_grid[1:], dtype=tf.int16))
+        # Replace ... with actual shape and dtype
     )
     return dataset.shuffle(10000).batch(512).prefetch(tf.data.AUTOTUNE)
 
+
 def train(model, outer_start=0, outer_max=100):
     # outer_max: update samples
-    inner_max = 5
-    epoch_training = 5  # model fitting times
+    inner_max = 8
+    epoch_training = 3  # model fitting times
     batch_training = 512
 
     buffer_new_size = 12000
     buffer_outer_max = 4
     repeat_new_buffer = 2
+    loss_threshold = .1
     history = None
     optimizer = Adam(learning_rate=0.001)  # Adjust the learning rate if needed
+    model.compile(optimizer=optimizer, loss=reward_loss, metrics=[average_score, 'mean_squared_error'])
     for outer in range(outer_start + 1, outer_start + 1 + outer_max):
         print('======== outer = {} ========'.format(outer))
         time_outer_begin = time.time()
@@ -583,8 +590,9 @@ def train(model, outer_start=0, outer_max=100):
 
         # getting new samples
         try:
-            new_buffer = collect_samples_multiprocess_queue(model_filename=FOLDER_NAME + f'whole_model/outer_{outer - 1}.h5',
-                                                            target_size=buffer_new_size)
+            new_buffer = collect_samples_multiprocess_queue(
+                model_filename=FOLDER_NAME + f'whole_model/outer_{outer - 1}.h5',
+                target_size=buffer_new_size)
             save_buffer_to_file(FOLDER_NAME + f'dataset/buffer_{outer}.pkl', new_buffer)
             buffer += new_buffer
         except Exception as e:
@@ -625,11 +633,19 @@ def train(model, outer_start=0, outer_max=100):
                 save_training_dataset_to_file(filename=FOLDER_NAME + 'dataset/dataset_{}.pkl'.format(outer),
                                               dataset=(s, target))
 
-            model.compile(optimizer=optimizer, loss=reward_loss, metrics=[average_score, 'mean_squared_error'])
             history = model.fit(split_input(s), target, batch_size=batch_training, epochs=epoch_training, verbose=0)
+
+            current_loss = history.history['loss'][-1]
+            print(f'      loss = {current_loss:.3f}')
             print('      loss = {:8.3f}   mse = {:8.3f}  average_score = {:8.3f}'.format(history.history['loss'][-1],
-                                                                history.history['mean_squared_error'][-1],
-                                                                history.history['average_score'][-1]))
+                                                                                         history.history[
+                                                                                             'mean_squared_error'][-1],
+                                                                                         history.history[
+                                                                                             'average_score'][-1]))
+            # Early stopping condition
+            if current_loss < loss_threshold:
+                print(f"      Early stopping: Loss threshold {loss_threshold} reached at inner = {inner + 1}")
+                break
 
         model.save(FOLDER_NAME + 'whole_model/outer_{}.h5'.format(outer))
         model.save_weights(FOLDER_NAME + 'checkpoints_dqn/outer_{}.weights.h5'.format(outer))
@@ -745,7 +761,7 @@ def append_record(text, filename=None):
 
 
 def collect_samples_multiprocess_queue(model_filename, target_size=10000):
-    timeout = 7200#30000
+    timeout = 7200  # 30000
     cpu_count = min(multiprocessing.cpu_count(), CPU_MAX)
     jobs = list()
     q = multiprocessing.Queue()
@@ -783,7 +799,7 @@ def modify_reward_coef(outer):
     r_2 = reward_coef_plan[1]
     start = reward_coef_plan[2]
     end = reward_coef_plan[3]
-    if(outer >= start and outer <=end):
+    if (outer >= start and outer <= end):
         for i in range(len(reward_coef)):
             rate = (outer - start) / (end - start)
             rate = min(rate, 1)
@@ -851,7 +867,6 @@ def setup_device():
     return physical_devices
 
 
-
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
     # Set the device (GPU/CPU)
@@ -868,9 +883,11 @@ if __name__ == "__main__":
 
     elif MODE == 'ai_player_training':
         load_model()
-        model_load = keras.models.load_model(model_path, custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
+        model_load = keras.models.load_model(model_path, custom_objects={'reward_loss': reward_loss,
+                                                                         'average_score': average_score})
         train(model_load, outer_start=OUT_START, outer_max=OUTER_MAX)
 
     elif MODE == 'ai_player_watching':
-        model_load = keras.models.load_model(model_path, custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
+        model_load = keras.models.load_model(model_path, custom_objects={'reward_loss': reward_loss,
+                                                                         'average_score': average_score})
         ai_play_search(model_load, is_gui_on=True)
