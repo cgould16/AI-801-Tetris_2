@@ -18,4 +18,6 @@ training may take a significant amount of cpu usage.
 NOTE:
 nov_13 - base model tested
 nov_24 - base model with GPU acceleration
-nov_25 - hyperparameter tuning added to incorporate encouraging exploration on early steps
+nov_25 - hyperparameter tuning added to incorporate encouraging exploration on early steps. Using coefficient plan and adjusted coefficients
+nov_26.1 - Added loss function based on average score instead of MSE. Refined coefficient numbers to what seemed best on last test.
+nov_26.2 - Added loss threshold and increased inner loops(epochs). Added lower exploration rate of .95

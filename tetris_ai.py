@@ -46,7 +46,7 @@ penalty = -500
 reward_coef = [0.5, 0.4, 0.3, 0.2]
 #reward_coef = [1.0, 1.0, 1.0, 1.0]
 #reward_coef_plan = [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, 50]
-reward_coef_plan = [[0.5, 0.4, 0.3, 0.2], [1.0, 0.8, 0.4, 0.1], 5, 50]
+reward_coef_plan = [[0.5, 0.4, 0.3, 0.2], [1.0, 0.6, 0.4, 0.1], 5, 50]
 num_search_best = 6
 num_search_rd = 6
 env_debug = None
@@ -151,8 +151,9 @@ def load_model(filepath=None):
     model_loaded.compile(
         optimizer = Adam(learning_rate=0.001),
         # loss='huber_loss',
-        loss='mean_squared_error',
-        metrics=['mean_squared_error']
+        #loss='mean_squared_error',
+        loss= reward_loss,
+        metrics=[average_score, 'mean_squared_error']
     )
     if filepath is not None:
         model_loaded.load_weights(filepath)
@@ -379,7 +380,7 @@ def gamestates_to_training_data(env, gamestates_steps):
 def get_data_from_playing_cnn2d(model_filename, target_size=8000, max_steps_per_episode=2000, proc_num=0,
                                 queue=None):
     tf.autograph.set_verbosity(3)
-    model = keras.models.load_model(model_filename)
+    model = keras.models.load_model(model_filename, custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
     if model is None:
         print('ERROR: model has not been loaded. Check this part.')
         exit()
@@ -462,7 +463,7 @@ def get_data_from_playing_cnn2d(model_filename, target_size=8000, max_steps_per_
 def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per_episode=1000, proc_num=0,
                                  queue=None):
     tf.autograph.set_verbosity(3)
-    model = keras.models.load_model(model_filename)
+    model = keras.models.load_model(model_filename, custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
     if model is None:
         print('ERROR: model has not been loaded. Check this part.')
         exit()
@@ -624,10 +625,11 @@ def train(model, outer_start=0, outer_max=100):
                 save_training_dataset_to_file(filename=FOLDER_NAME + 'dataset/dataset_{}.pkl'.format(outer),
                                               dataset=(s, target))
 
-            model.compile(optimizer=optimizer, loss='mean_squared_error', metrics=['mean_squared_error'])
+            model.compile(optimizer=optimizer, loss=reward_loss, metrics=[average_score, 'mean_squared_error'])
             history = model.fit(split_input(s), target, batch_size=batch_training, epochs=epoch_training, verbose=0)
-            print('      loss = {:8.3f}   mse = {:8.3f}'.format(history.history['loss'][-1],
-                                                                history.history['mean_squared_error'][-1]))
+            print('      loss = {:8.3f}   mse = {:8.3f}  average_score = {:8.3f}'.format(history.history['loss'][-1],
+                                                                history.history['mean_squared_error'][-1],
+                                                                history.history['average_score'][-1]))
 
         model.save(FOLDER_NAME + 'whole_model/outer_{}.h5'.format(outer))
         model.save_weights(FOLDER_NAME + 'checkpoints_dqn/outer_{}.weights.h5'.format(outer))
@@ -743,7 +745,7 @@ def append_record(text, filename=None):
 
 
 def collect_samples_multiprocess_queue(model_filename, target_size=10000):
-    timeout = 30000
+    timeout = 7200#30000
     cpu_count = min(multiprocessing.cpu_count(), CPU_MAX)
     jobs = list()
     q = multiprocessing.Queue()
@@ -781,12 +783,13 @@ def modify_reward_coef(outer):
     r_2 = reward_coef_plan[1]
     start = reward_coef_plan[2]
     end = reward_coef_plan[3]
-    for i in range(len(reward_coef)):
-        rate = (outer - start) / (end - start)
-        rate = min(rate, 1)
-        rate = max(rate, 0)
-        reward_coef[i] = r_1[i] + (r_2[i] - r_1[i]) * rate
-        reward_coef[i] = round(reward_coef[i] * 1024) / 1024
+    if(outer >= start and outer <=end):
+        for i in range(len(reward_coef)):
+            rate = (outer - start) / (end - start)
+            rate = min(rate, 1)
+            rate = max(rate, 0)
+            reward_coef[i] = r_1[i] + (r_2[i] - r_1[i]) * rate
+            reward_coef[i] = round(reward_coef[i] * 1024) / 1024
     print(f' reward_coef modified to {reward_coef}')
 
 
@@ -813,6 +816,14 @@ def get_reward(add_scores, dones, add=0):
             add_score += penalty
         reward.append(add_score + add)
     return np.array(reward).reshape([-1, 1])
+
+
+def reward_loss(y_pred, y_true):
+    return tf.reduce_mean(tf.square(y_pred - y_true))
+
+
+def average_score(y_true, y_pred):
+    return tf.reduce_mean(y_pred)  # Mean of the rewards is the average score
 
 
 def setup_device():
@@ -857,9 +868,9 @@ if __name__ == "__main__":
 
     elif MODE == 'ai_player_training':
         load_model()
-        model_load = keras.models.load_model(model_path)
+        model_load = keras.models.load_model(model_path, custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
         train(model_load, outer_start=OUT_START, outer_max=OUTER_MAX)
 
     elif MODE == 'ai_player_watching':
-        model_load = keras.models.load_model(model_path)
+        model_load = keras.models.load_model(model_path, custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
         ai_play_search(model_load, is_gui_on=True)
