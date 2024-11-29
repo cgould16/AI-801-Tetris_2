@@ -37,7 +37,7 @@ else:
 shape_dense = (1, GAME_BOARD_WIDTH * 2 + 1 + 6 * Tetromino.pool_size())
 
 gamma = 0.95
-epsilon = 0.06
+epsilon = .5
 
 current_avg_score = 0
 rand = random.Random()
@@ -149,10 +149,10 @@ def load_model(filepath=None):
         exit()
 
     model_loaded.compile(
-        optimizer = Adam(learning_rate=0.001),
+        optimizer=Adam(learning_rate=0.001),
         # loss='huber_loss',
-        #loss='mean_squared_error',
-        loss= reward_loss,
+        # loss='mean_squared_error',
+        loss=reward_loss,
         metrics=[average_score, 'mean_squared_error']
     )
     if filepath is not None:
@@ -470,10 +470,6 @@ def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per
         print('ERROR: model has not been loaded. Check this part.')
         exit()
 
-    global epsilon
-    if proc_num == 0:
-        epsilon = 0
-
     data = list()
     env = Game()
     episode_max = 1000
@@ -578,8 +574,13 @@ def train(model, outer_start=0, outer_max=100):
     repeat_new_buffer = 2
     loss_threshold = .1
     history = None
+    epsilon_start = .154#0.5
+    epsilon_min = 0.01
+    epsilon_decay_rate = 0.05
+
     optimizer = Adam(learning_rate=0.001)  # Adjust the learning rate if needed
     model.compile(optimizer=optimizer, loss=reward_loss, metrics=[average_score, 'mean_squared_error'])
+    epsilon = epsilon_start
     for outer in range(outer_start + 1, outer_start + 1 + outer_max):
         print('======== outer = {} ========'.format(outer))
         time_outer_begin = time.time()
@@ -637,11 +638,11 @@ def train(model, outer_start=0, outer_max=100):
 
             current_loss = history.history['loss'][-1]
             print(f'      loss = {current_loss:.3f}')
-            print('      loss = {:8.3f}   mse = {:8.3f}  average_score = {:8.3f}'.format(history.history['loss'][-1],
+            print('      loss = {:8.3f}   mse = {:8.3f}  average_score = {:8.3f}    epsilon = {:8.3f}'.format(history.history['loss'][-1],
                                                                                          history.history[
                                                                                              'mean_squared_error'][-1],
                                                                                          history.history[
-                                                                                             'average_score'][-1]))
+                                                                                             'average_score'][-1], epsilon))
             # Early stopping condition
             if current_loss < loss_threshold:
                 print(f"      Early stopping: Loss threshold {loss_threshold} reached at inner = {inner + 1}")
@@ -664,6 +665,9 @@ def train(model, outer_start=0, outer_max=100):
                     )
         append_record(text_)
         print('   ' + text_)
+
+        epsilon = max(epsilon_min, epsilon * (1 - epsilon_decay_rate))
+        print('epsilon = {:>8.3f}'.format(epsilon))
 
 
 def save_buffer_to_file(filename, buffer):
