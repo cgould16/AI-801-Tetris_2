@@ -3,12 +3,11 @@ import sys
 import threading
 import queue
 
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '4'
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-#os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false"
+# os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false"
 
 import numpy as np
 import tensorflow as tf
@@ -36,17 +35,16 @@ else:
 
 shape_dense = (1, GAME_BOARD_WIDTH * 2 + 1 + 6 * Tetromino.pool_size())
 
-gamma = 0.95
-epsilon = .5
-
+gamma = 0.99
+epsilon = .1
 current_avg_score = 0
 rand = random.Random()
 
 penalty = -500
-reward_coef = [0.5, 0.4, 0.3, 0.2]
-# reward_coef = [1.0, 1.0, 1.0, 1.0]
+#reward_coef = [1.00, 0.75, 0.5, 0.3]
+reward_coef = [1.2, 1.0, 0.7, 0.6]
 # reward_coef_plan = [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, 50]
-reward_coef_plan = [[0.5, 0.4, 0.3, 0.2], [1.0, 0.6, 0.4, 0.1], 5, 50]
+reward_coef_plan = [[1.2, 1.0, 0.7, 0.6], [1.2, 1.0, 0.7, 0.6],1, 50]
 num_search_best = 6
 num_search_rd = 6
 env_debug = None
@@ -57,20 +55,26 @@ def make_model_conv2d_v1():
     a = layers.Conv2D(
         64, 6, activation="relu", input_shape=shape_main_grid[1:]
     )(main_grid_input)
+    a = layers.BatchNormalization()(a)
     a = layers.Conv2D(32, (3, 3), activation="relu")(a)
+    a = layers.BatchNormalization()(a)
     a = layers.MaxPool2D(pool_size=(13, 3))(a)
     a = layers.Flatten()(a)
 
-    b = layers.Conv2D(
-        128, 4, activation="relu", input_shape=shape_main_grid[1:]
-    )(main_grid_input)
+    # Branch b
+    b = layers.Conv2D(128, (3, 3), activation="relu", input_shape=shape_main_grid[1:])(main_grid_input)
+    b = layers.BatchNormalization()(b)
     b = layers.Conv2D(32, (3, 3), activation="relu")(b)
-    b = layers.MaxPool2D(pool_size=(15, 5))(b)
+    b = layers.BatchNormalization()(b)
+    b = layers.MaxPool2D(pool_size=(3, 3))(b)  # Reduced pooling size
     b = layers.Flatten()(b)
 
+    # Additional input
     hold_next_input = keras.Input(shape=shape_hold_next[1:], name="hold_next_input")
 
+    # Merge and Dense layers
     x = layers.concatenate([a, b, hold_next_input])
+    x = layers.BatchNormalization()(x)
     x = layers.Dense(64, activation="relu")(x)
     x = layers.Dense(128, activation="relu")(x)
     critic_output = layers.Dense(1)(x)  # activation=None -> 'linear'
@@ -147,13 +151,19 @@ def load_model(filepath=None):
         model_loaded = None
         sys.stderr.write('STATE_INPUT is wrong. Exit...')
         exit()
-
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=0.001,
+        decay_steps=10000,
+        decay_rate=0.96,
+        staircase=True)
+    #optimizer = Adam(learning_rate=lr_schedule)
+    optimizer = Adam(learning_rate=0.001)
     model_loaded.compile(
-        optimizer=Adam(learning_rate=0.001),
+        optimizer=optimizer,
         # loss='huber_loss',
-        # loss='mean_squared_error',
-        loss=reward_loss,
-        metrics=[average_score, 'mean_squared_error']
+        #loss='mean_squared_error',
+        loss=q_loss,
+        metrics=[q_loss, average_score, 'mean_squared_error']
     )
     if filepath is not None:
         model_loaded.load_weights(filepath)
@@ -381,7 +391,7 @@ def get_data_from_playing_cnn2d(model_filename, target_size=8000, max_steps_per_
                                 queue=None):
     tf.autograph.set_verbosity(3)
     model = keras.models.load_model(model_filename,
-                                    custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
+                                    custom_objects={'q_loss': q_loss, 'average_score': average_score})
     if model is None:
         print('ERROR: model has not been loaded. Check this part.')
         exit()
@@ -465,7 +475,7 @@ def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per
                                  queue=None):
     tf.autograph.set_verbosity(3)
     model = keras.models.load_model(model_filename,
-                                    custom_objects={'reward_loss': reward_loss, 'average_score': average_score})
+                                    custom_objects={'q_loss': q_loss, 'average_score': average_score})
     if model is None:
         print('ERROR: model has not been loaded. Check this part.')
         exit()
@@ -516,11 +526,6 @@ def get_data_from_playing_search(model_filename, target_size=8000, max_steps_per
 
 
 def buffer_data_generator(model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer):
-    """
-    Generates data dynamically with multiprocessing for new samples
-    and integrates previous buffers for training.
-    """
-    # Step 1: Collect new samples with multiprocessing
     try:
         new_buffer = collect_samples_multiprocess_queue(model_filename=model_filename, target_size=buffer_new_size)
         print(f"New buffer size: {len(new_buffer)}")
@@ -528,7 +533,6 @@ def buffer_data_generator(model_filename, buffer_new_size, repeat_new_buffer, bu
     except Exception as e:
         print(f"Error collecting new samples: {e}")
 
-    # Step 2: Load previous buffers from files
     for i in range(max(1, outer - buffer_outer_max + 1), outer):
         try:
             previous_buffer = load_buffer_from_file(FOLDER_NAME + f'dataset/buffer_{i}.pkl')
@@ -539,7 +543,6 @@ def buffer_data_generator(model_filename, buffer_new_size, repeat_new_buffer, bu
         except Exception as e:
             print(f"Error loading previous buffer {i}: {e}")
 
-    # Step 3: Repeat the latest buffer for additional weighting
     for _ in range(repeat_new_buffer):
         try:
             repeated_buffer = load_buffer_from_file(FOLDER_NAME + f'dataset/buffer_{outer}.pkl')
@@ -558,15 +561,14 @@ def create_dataset(model_filename, buffer_new_size, repeat_new_buffer, buffer_ou
             model_filename, buffer_new_size, repeat_new_buffer, buffer_outer_max, outer
         ),
         output_signature=(tf.TensorSpec(shape=shape_main_grid[1:], dtype=tf.int16))
-        # Replace ... with actual shape and dtype
     )
     return dataset.shuffle(10000).batch(512).prefetch(tf.data.AUTOTUNE)
 
 
 def train(model, outer_start=0, outer_max=100):
     # outer_max: update samples
-    inner_max = 8
-    epoch_training = 3  # model fitting times
+    inner_max = 6
+    epoch_training = 5 # model fitting times
     batch_training = 512
 
     buffer_new_size = 12000
@@ -574,12 +576,25 @@ def train(model, outer_start=0, outer_max=100):
     repeat_new_buffer = 2
     loss_threshold = .1
     history = None
-    epsilon_start = .154#0.5
+    last_avg_score = None
+    global penalty
+    penalty_increase_factor = 1.2
+    penalty_max = -1500
+    no_improvement_count = 0
+    epsilon_start = .06
     epsilon_min = 0.01
     epsilon_decay_rate = 0.05
+    former_loss = 0.0
 
-    optimizer = Adam(learning_rate=0.001)  # Adjust the learning rate if needed
-    model.compile(optimizer=optimizer, loss=reward_loss, metrics=[average_score, 'mean_squared_error'])
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=0.001,
+        decay_steps=10000,
+        decay_rate=0.96,
+        staircase=True)
+    #optimizer = Adam(learning_rate=lr_schedule)
+    optimizer = Adam(learning_rate=0.001)
+    # Adjust the learning rate if needed
+    model.compile(optimizer=optimizer, loss=q_loss, metrics=[q_loss, average_score, 'mean_squared_error'])
     epsilon = epsilon_start
     for outer in range(outer_start + 1, outer_start + 1 + outer_max):
         print('======== outer = {} ========'.format(outer))
@@ -644,10 +659,10 @@ def train(model, outer_start=0, outer_max=100):
                                                                                          history.history[
                                                                                              'average_score'][-1], epsilon))
             # Early stopping condition
-            if current_loss < loss_threshold:
+            if former_loss != 0.0 and abs(current_loss - former_loss) < loss_threshold:
                 print(f"      Early stopping: Loss threshold {loss_threshold} reached at inner = {inner + 1}")
                 break
-
+        former_loss = current_loss
         model.save(FOLDER_NAME + 'whole_model/outer_{}.h5'.format(outer))
         model.save_weights(FOLDER_NAME + 'checkpoints_dqn/outer_{}.weights.h5'.format(outer))
 
@@ -657,7 +672,7 @@ def train(model, outer_start=0, outer_max=100):
             text_ += f'input shapes: {shape_main_grid} {shape_hold_next} \n {shape_hold_next_description} \n'
 
         text_ += 'outer = {:>4d} | pre-training avg score = {:>8.3f} | loss = {:>8.3f} | mse = {:>8.3f} |' \
-                 ' dataset size = {:>7d} | new dataset size = {:>7d} | time elapsed: {:>6.1f} sec | coef = {} | penalty = {:>7d} | gamma = {:>6.3f} |' \
+                 ' dataset size = {:>7d} | new dataset size = {:>7d} | time elapsed: {:>6.1f} sec | coef = {} | penalty = {:>7.3f} | gamma = {:>6.3f} |' \
                  ' search best/rd = {}, {} |\n' \
             .format(outer, current_avg_score, history.history['loss'][-1], history.history['mean_squared_error'][-1],
                     buffer_size, new_buffer_size, time_outer_end - time_outer_begin, reward_coef, penalty, gamma,
@@ -665,9 +680,25 @@ def train(model, outer_start=0, outer_max=100):
                     )
         append_record(text_)
         print('   ' + text_)
+        # If this is not the first iteration, compare the current average score with the last one
+        if last_avg_score is not None:
+            if current_avg_score <= last_avg_score:  # No improvement in average score
+                no_improvement_count += 1
+                print('current_avg_score: ' + str(current_avg_score))
+            else:
+                no_improvement_count = 0  # Reset counter if improvement is seen
 
-        epsilon = max(epsilon_min, epsilon * (1 - epsilon_decay_rate))
+        # Increase the penalty if there is no improvement for 5 consecutive iterations
+        if no_improvement_count >= 2:
+            penalty = max(penalty * penalty_increase_factor, penalty_max)
+            print(f'Penalty increased to {penalty:.3f} due to lack of improvement in average score')
+
+            # Reset the counter
+            no_improvement_count = 0
+
+        epsilon = epsilon_min + (epsilon_start - epsilon_min) * np.exp(-epsilon_decay_rate * outer)
         print('epsilon = {:>8.3f}'.format(epsilon))
+        last_avg_score = current_avg_score
 
 
 def save_buffer_to_file(filename, buffer):
@@ -770,6 +801,7 @@ def collect_samples_multiprocess_queue(model_filename, target_size=10000):
     jobs = list()
     q = multiprocessing.Queue()
     for i in range(cpu_count):
+        #add in get_data_from_playing_cnn2d next iteration
         p = multiprocessing.Process(target=get_data_from_playing_search,
                                     args=(
                                         model_filename, int(target_size / cpu_count), 250, i, q))
@@ -823,14 +855,15 @@ def get_reward(add_scores, dones, add=0):
         # if add_score != int(add_score):
         #     add_score = add_score * 10
 
-        if add_score >= 90:
+        if add_score >= 70:
             add_score = add_score * reward_coef[0]
         elif add_score >= 50:
             add_score = add_score * reward_coef[1]
-        elif add_score >= 20:
+        elif add_score >= 30:
             add_score = add_score * reward_coef[2]
         elif add_score >= 5:
             add_score = add_score * reward_coef[3]
+
 
         if dones[i]:
             add_score += penalty
@@ -838,21 +871,17 @@ def get_reward(add_scores, dones, add=0):
     return np.array(reward).reshape([-1, 1])
 
 
-def reward_loss(y_pred, y_true):
+def q_loss(y_pred, y_true):
     return tf.reduce_mean(tf.square(y_pred - y_true))
-
 
 def average_score(y_true, y_pred):
     return tf.reduce_mean(y_pred)  # Mean of the rewards is the average score
 
-
 def setup_device():
-    # Check for available physical GPUs
     tf.debugging.set_log_device_placement(True)
     print(tf.sysconfig.get_build_info())
     physical_devices = tf.config.list_physical_devices("GPU")
     if physical_devices:
-        # Enable memory growth for all GPUs (not just the first one)
         try:
             for gpu in physical_devices:
                 tf.config.experimental.set_memory_growth(gpu, True)
@@ -865,7 +894,6 @@ def setup_device():
 
     else:
         print("No GPU detected. Training will proceed on CPU.")
-        # Fallback to CPU if no GPU is found
         tf.config.set_visible_devices([], 'GPU')
 
     return physical_devices
@@ -873,10 +901,8 @@ def setup_device():
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
-    # Set the device (GPU/CPU)
     physical_devices = setup_device()
     print(physical_devices)
-    # Define model path and mode
     model_path = FOLDER_NAME + 'whole_model/outer_{}.h5'.format(OUT_START)
 
     if MODE == 'human_player':
@@ -887,11 +913,11 @@ if __name__ == "__main__":
 
     elif MODE == 'ai_player_training':
         load_model()
-        model_load = keras.models.load_model(model_path, custom_objects={'reward_loss': reward_loss,
+        model_load = keras.models.load_model(model_path, custom_objects={'q_loss': q_loss,
                                                                          'average_score': average_score})
         train(model_load, outer_start=OUT_START, outer_max=OUTER_MAX)
 
     elif MODE == 'ai_player_watching':
-        model_load = keras.models.load_model(model_path, custom_objects={'reward_loss': reward_loss,
+        model_load = keras.models.load_model(model_path, custom_objects={'q_loss': q_loss,
                                                                          'average_score': average_score})
         ai_play_search(model_load, is_gui_on=True)
